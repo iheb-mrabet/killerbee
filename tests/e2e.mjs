@@ -1,0 +1,148 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(resolve(root, 'frontend/package.json'));
+const { chromium, request, expect } = require('@playwright/test');
+const baseURL = 'http://127.0.0.1:5100';
+mkdirSync(resolve(root, '.demo'), { recursive: true });
+mkdirSync(resolve(root, 'test-results'), { recursive: true });
+const log = createWriteStream(resolve(root, '.demo/runner.log'));
+const runner = spawn(process.execPath, ['scripts/demo.mjs', '--no-build'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+runner.stdout.pipe(log); runner.stderr.pipe(log);
+let browser;
+const contexts = [];
+let assertions = 0;
+function check(condition, message) { assert.ok(condition, message); assertions++; console.log(`PASS ${message}`); }
+async function login(role) {
+  const context = await request.newContext({ baseURL }); contexts.push(context);
+  let session = await (await context.get('/api/session')).json();
+  assert.equal((await context.post('/auth/demo-login', { headers: { 'X-CSRF-TOKEN': session.csrfToken }, data: { role } })).status(), 200);
+  session = await (await context.get('/api/session')).json();
+  return async (operation, payload = {}, expectedStatus = 200, client = { kind: 'killerbee-web', version: '1.0' }) => {
+    const response = await context.post('/api/operations', { headers: { 'X-CSRF-TOKEN': session.csrfToken }, data: { requestId: crypto.randomUUID(), client, operation, payload } });
+    const result = await response.json();
+    assert.equal(response.status(), expectedStatus, `${operation}: ${JSON.stringify(result)}`);
+    return expectedStatus === 200 ? result.data : result;
+  };
+}
+try {
+  const deadline = Date.now() + 60000; let ready = false;
+  while (Date.now() < deadline) {
+    if (runner.exitCode !== null) throw new Error('Demo runner exited before readiness.');
+    try { ready = (await fetch(`${baseURL}/health`)).ok; } catch { /* booting */ }
+    if (ready) break;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  assert.ok(ready, 'Demo startup timed out.');
+  const anonymous = await request.newContext({ baseURL }); contexts.push(anonymous);
+  check((await anonymous.post('/api/operations', { data: {} })).status() === 401, 'anonymous application requests are refused');
+  check((await anonymous.post('/auth/demo-login', { data: { role: 'RD' } })).status() === 400, 'login requires an antiforgery token');
+  check((await anonymous.post('http://127.0.0.1:5201/components/execute', { data: {} })).status() === 401, 'direct unsigned component calls are refused');
+  const rd = await login('RD'); const test = await login('TEST'); const prod = await login('PROD');
+  const a = await rd('system.identity'), b = await rd('system.identity');
+  check(new Set([a.instance, b.instance]).size === 2, 'platform distributes requests to both component instances');
+  check(a.demo === true && a.originalLogin === null, 'demo explicitly reports that AD/SQL identity is not verified');
+  const unsupported = await rd('models.list', {}, 400, { kind: 'killerbee-web', version: '9.0' });
+  check(unsupported.code === 'CLIENT_UNSUPPORTED', 'resolution controller checks application versions');
+  check((await prod('ingredients.list', {}, 403)).code === 'ACCESS_DENIED', 'production cannot read the ingredient master');
+  await test('models.save', {}, 403); await rd('tests.execute', {}, 403);
+  check(true, 'business actions enforce R&D and test-service separation');
+  const suffix = Date.now().toString(36);
+  const ingredient = await rd('ingredients.save', { name: `Résine E2E ${suffix}`, description: 'Ingrédient fictif pour test automatisé' });
+  const definitions = await rd('characteristics.list');
+  const diameter = definitions.find(d => d.name === 'Diamètre');
+  const values = { [diameter.id]: '27.3' };
+  let model = await rd('models.save', { name: `KB E2E ${suffix}`, description: 'Modèle créé et testé de bout en bout', range: 'Sport', unitPriceCents: 2499, ingredients: [{ ingredientId: ingredient.id, quantityCg: 12537 }], characteristics: values });
+  const modelId = model.id;
+  check(model.ingredients[0].quantityCg === 12537 && model.unitPriceCents === 2499, 'hundredths of grams and monetary cents stay exact');
+  check((await prod('models.get', { id: modelId }, 404)).code === 'NOT_FOUND', 'production cannot read a draft by guessing its ID');
+  const dynamic = await rd('characteristics.save', { name: `Rigidité ${suffix}`, kind: 'text', unit: '', required: false, modelId });
+  model = await rd('models.get', { id: modelId }); values[dynamic.id] = 'Souple';
+  model = await rd('models.save', { ...model, characteristics: values, ingredients: model.ingredients });
+  check(model.characteristics.some(v => v.name === `Rigidité ${suffix}` && v.value === 'Souple'), 'new model-specific characteristics work without a schema change');
+  let process = await rd('processes.save', { modelId, name: `Moulage ${suffix}`, description: 'Instructions de démonstration', steps: [{ name: 'Peser', description: 'Peser à 0,01 g près' }, { name: 'Mouler', description: 'Suivre le mode opératoire' }] });
+  const t1 = await rd('tests.save', { processId: process.id, stepId: process.steps[0].id, name: `Masse ${suffix}`, description: 'Contrôler la masse', expectedResult: '125,37 g' });
+  const t2 = await rd('tests.save', { processId: process.id, stepId: null, name: `Contrôle final ${suffix}`, description: 'Vérifier la conformité', expectedResult: 'Conforme' });
+  model = await rd('models.get', { id: modelId });
+  await rd('models.submit', { id: modelId, revision: model.revision });
+  const failed = await test('tests.execute', { testId: t1.id, outcome: 'Failed', observations: 'Écart mesuré' });
+  await test('tests.validate', { executionId: failed.id, approved: true, comment: 'Refus obligatoire' }, 400);
+  await test('tests.validate', { executionId: failed.id, approved: false, comment: 'Mesure non conforme' });
+  check(true, 'a failed execution cannot be approved');
+  const passed1 = await test('tests.execute', { testId: t1.id, outcome: 'Passed', observations: '125,37 g mesurés' });
+  await test('tests.validate', { executionId: passed1.id, approved: true, comment: 'Mesure conforme' });
+  check((await prod('models.get', { id: modelId }, 404)).code === 'NOT_FOUND', 'all required tests must pass before publication');
+  const passed2 = await test('tests.execute', { testId: t2.id, outcome: 'Passed', observations: 'Conforme' });
+  await test('tests.validate', { executionId: passed2.id, approved: true, comment: 'Autorisation de production' });
+  const released = await prod('models.get', { id: modelId });
+  check(released.state === 'Validated' && released.ingredients[0].quantityCg === 12537, 'complete R&D to testing to production workflow succeeds');
+  check((await prod('models.list')).every(m => m.state === 'Validated'), 'production catalogue contains only validated models');
+  await rd('ingredients.delete', { id: ingredient.id, revision: ingredient.revision }, 409);
+  check(true, 'referenced ingredients cannot be deleted');
+  await rd('models.delete', { id: modelId, revision: 0 }, 409);
+  check(true, 'stale revisions cannot overwrite or delete data');
+  model = await rd('models.get', { id: modelId });
+  await rd('models.save', { ...model, characteristics: values, ingredients: [{ ingredientId: ingredient.id, quantityCg: 12538 }] });
+  await prod('models.get', { id: modelId }, 404);
+  const stale = await test('tests.validate', { executionId: passed2.id, approved: true, comment: 'Ne doit pas passer' }, 409);
+  check(stale.code === 'STALE_TEST', 'recipe changes invalidate old approvals and reject stale test results');
+  process = await rd('processes.get', { id: process.id });
+  const reordered = await rd('processes.save', { ...process, steps: [...process.steps].reverse() });
+  check(reordered.steps[0].name === 'Mouler' && reordered.steps[1].position === 2, 'manufacturing steps preserve explicit execution order');
+  const unused = await rd('ingredients.save', { name: `Supprimable ${suffix}`, description: 'Sans référence' });
+  await rd('ingredients.save', { ...unused, description: 'Description modifiée' });
+  await rd('ingredients.delete', { id: unused.id, revision: 2 });
+  check(true, 'ingredient create, update and delete operations work');
+  const audit = await rd('audit.list');
+  check(audit.some(e => e.actor === 'demo.rd') && audit.some(e => e.actor === 'demo.test'), 'audit records both research and testing identities');
+
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(baseURL);
+  await page.getByRole('button', { name: /Recherche & développement/ }).click();
+  await expect(page.getByRole('heading', { name: 'Vue d’ensemble', exact: true })).toBeVisible();
+  await expect(page.getByText('KB Loisir', { exact: true })).toBeVisible();
+  await page.screenshot({ path: resolve(root, 'test-results/dashboard.png'), fullPage: true });
+  const nav = page.getByRole('navigation', { name: 'Navigation principale' });
+  await nav.getByRole('button', { name: 'Ingrédients', exact: true }).click();
+  await page.getByRole('button', { name: 'Nouvel ingrédient', exact: true }).click();
+  await page.getByLabel('Nom *', { exact: true }).fill(`UI ${suffix}`);
+  await page.getByLabel('Description *', { exact: true }).fill('Créé depuis le formulaire utilisateur');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText(`UI ${suffix}`, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: `Modifier UI ${suffix}`, exact: true }).click();
+  await page.getByLabel('Description *', { exact: true }).fill('Modifié depuis l’interface');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect(page.getByText('Modifié depuis l’interface', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: `Supprimer UI ${suffix}`, exact: true }).click();
+  await page.getByRole('button', { name: 'Supprimer', exact: true }).click();
+  await expect(page.getByText(`UI ${suffix}`, { exact: true })).toHaveCount(0);
+  check(true, 'real browser can create, edit and delete an ingredient');
+  await nav.getByRole('button', { name: 'Modèles', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Consulter', exact: true }).first()).toBeVisible();
+  await page.screenshot({ path: resolve(root, 'test-results/models.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: resolve(root, 'test-results/mobile.png'), fullPage: true });
+  check(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'mobile layout fits a 390px viewport');
+  check(errors.length === 0, `browser has no runtime errors (${errors.join('; ')})`);
+  console.log(`KillerBee end-to-end verification passed: ${assertions} checks.`);
+} catch (error) {
+  console.error(error);
+  for (const name of ['runner', 'local', 'platform', 'components-a', 'components-b']) {
+    try { console.error(`--- ${name} log ---\n${readFileSync(resolve(root, `.demo/${name}.log`), 'utf8').slice(-18000)}`); } catch { /* no log */ }
+  }
+  process.exitCode = 1;
+} finally {
+  await browser?.close();
+  await Promise.all(contexts.map(c => c.dispose()));
+  runner.kill('SIGTERM');
+  await Promise.race([new Promise(r => runner.once('exit', r)), new Promise(r => setTimeout(r, 5000))]);
+  if (runner.exitCode === null) runner.kill('SIGKILL');
+  log.end();
+}

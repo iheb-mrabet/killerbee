@@ -47,6 +47,7 @@ public static class AppSetup
 {
     public static RuntimeSettings AddKillerBee(this WebApplicationBuilder builder, bool local = false)
     {
+        builder.Host.UseWindowsService();
         var settings = RuntimeSettings.Read(builder);
         builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 1_048_576);
         builder.Services.AddSingleton(settings);

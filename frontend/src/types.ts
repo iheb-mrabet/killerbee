@@ -1,0 +1,13 @@
+export type Role = 'RD' | 'TEST' | 'PROD';
+export type Session = { demo: boolean; csrfToken: string; user: { name: string; roles: Role[] } | null };
+export type Model = { id: string; name: string; description: string; unitPriceCents: number; range: string; revision: number; state: 'Draft' | 'InTesting' | 'Validated' };
+export type Ingredient = { id: string; name: string; description: string; revision: number };
+export type Characteristic = { id: string; name: string; kind: 'text' | 'number' | 'boolean'; unit: string; required: boolean; modelId: string | null; revision: number };
+export type ModelDetail = Model & { ingredients: { ingredientId: string; name: string; quantityCg: number }[]; characteristics: { characteristicId: string; name: string; kind: string; unit: string; value: string }[] };
+export type Step = { id?: string; name: string; description: string; position?: number };
+export type Process = { id: string; modelId: string; name: string; description: string; revision: number; steps?: Step[] };
+export type Execution = { id: string; testId: string; modelRevision: number; outcome: string; observations: string; executedBy: string; executedAt: string; validation: string; validatedBy: string | null; validatedAt: string | null; validationComment: string; current: boolean };
+export type Test = { id: string; processId: string; processName: string; stepId: string | null; name: string; description: string; expectedResult: string; revision: number; modelId: string; modelName: string; modelState: string; modelRevision: number; executions: Execution[] };
+export type Audit = { id: number; at: string; actor: string; operation: string; entityId: string; correlationId: string };
+export type Identity = { user: string; roles: Role[]; sqlIdentity: string; originalLogin: string | null; instance: string; demo: boolean };
+export type Dashboard = { models: number; validated: number; processes: number; pending: number; instance: string; demo: boolean };

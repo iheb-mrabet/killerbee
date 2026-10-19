@@ -12,13 +12,26 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - run: dotnet restore KillerBee.slnx
       - run: dotnet build KillerBee.slnx --no-restore --configuration Release
       - run: dotnet test tests/KillerBee.Tests --no-build --configuration Release --logger trx
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Full application and browser verification
+        run: node tests/e2e.mjs
       - name: Export SQL Server reference schema
         run: dotnet run --project src/KillerBee.Components --configuration Release --no-build -- --schema > database/generated-schema.sql
-      - name: Inspect generated reference schema
-        run: cat database/generated-schema.sql
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -26,3 +39,15 @@ jobs:
           path: |
             **/TestResults/*.trx
             database/generated-schema.sql
+            test-results/*.png
+            .demo/*.log
+          include-hidden-files: true
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build KillerBee.slnx --configuration Release
+      - run: dotnet test tests/KillerBee.Tests --no-build --configuration Release
