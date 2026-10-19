@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../KillerBee.Hosting/KillerBee.Hosting.csproj" />
+    <ProjectReference Include="../KillerBee.Data/KillerBee.Data.csproj" />
+  </ItemGroup>
+</Project>

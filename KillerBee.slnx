@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KillerBee.Core/KillerBee.Core.csproj" />
+    <Project Path="src/KillerBee.Hosting/KillerBee.Hosting.csproj" />
+    <Project Path="src/KillerBee.Data/KillerBee.Data.csproj" />
+    <Project Path="src/KillerBee.Local/KillerBee.Local.csproj" />
+    <Project Path="src/KillerBee.Platform/KillerBee.Platform.csproj" />
+    <Project Path="src/KillerBee.Components/KillerBee.Components.csproj" />
+  </Folder>
+  <Folder Name="/tests/"><Project Path="tests/KillerBee.Tests/KillerBee.Tests.csproj" /></Folder>
+</Solution>
