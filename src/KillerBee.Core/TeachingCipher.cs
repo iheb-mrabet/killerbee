@@ -65,7 +65,8 @@ public sealed class TeachingCipher
         try
         {
             if (message.Version != 1 || message.Payload.Length > 1_400_000 || message.Nonce.Length != 32
-                || Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - message.IssuedAt) > 120
+                || message.IssuedAt < DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 120
+                || message.IssuedAt > DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 120
                 || !CryptographicOperations.FixedTimeEquals(Convert.FromBase64String(message.Tag),
                     Sign(message.Version, message.Nonce, message.IssuedAt, message.Payload)))
                 throw new CryptographicException();
