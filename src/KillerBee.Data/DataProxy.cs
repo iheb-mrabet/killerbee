@@ -14,6 +14,15 @@ public sealed class DataProxy(DbContextOptions<KillerBeeDb> options, bool demo)
         async Task<T> Transaction()
         {
             await using var db = new KillerBeeDb(options);
+            if (!demo)
+            {
+                await db.Database.OpenConnectionAsync();
+                await using var identityCommand = db.Database.GetDbConnection().CreateCommand();
+                identityCommand.CommandText = "SELECT ORIGINAL_LOGIN()";
+                var actual = Convert.ToString(await identityCommand.ExecuteScalarAsync());
+                if (!string.Equals(actual, user.Identity?.Name, StringComparison.OrdinalIgnoreCase))
+                    throw new BusinessException(403, "SQL_IDENTITY_MISMATCH", "SQL Server n’utilise pas l’identité du collaborateur. Vérifiez la délégation AD.");
+            }
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             try
             {

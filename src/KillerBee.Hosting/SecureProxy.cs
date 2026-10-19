@@ -107,6 +107,8 @@ public sealed class SecureProxy(RuntimeSettings settings, NonceStore nonces)
             if (!OperatingSystem.IsWindows()) throw new InvalidOperationException("Windows required.");
             var identity = user.Identities.OfType<WindowsIdentity>().FirstOrDefault()
                 ?? throw new BusinessException(401, "WINDOWS_IDENTITY_REQUIRED", "Une identité Windows déléguable est nécessaire.");
+            if (identity.ImpersonationLevel != TokenImpersonationLevel.Delegation)
+                throw new BusinessException(403, "DELEGATION_REQUIRED", "La session Windows ne permet pas la délégation. Vérifiez Kerberos et les SPN.");
             return await WindowsIdentity.RunImpersonatedAsync(identity.AccessToken, Send);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)

@@ -9,7 +9,7 @@ if (args.Contains("--schema", StringComparer.Ordinal))
     var opts = new DbContextOptionsBuilder<KillerBeeDb>().UseSqlServer("Server=localhost;Database=KillerBee;Integrated Security=true;Encrypt=true").Options;
     using var db = new KillerBeeDb(opts);
     Console.WriteLine(db.Database.GenerateCreateScript());
-    Console.WriteLine("GO\n" + KillerBeeDb.Views(false));
+    Console.WriteLine("GO\nIF SCHEMA_ID(N'SCH_PROD') IS NULL EXEC(N'CREATE SCHEMA [SCH_PROD] AUTHORIZATION [dbo]');\nGO\n" + KillerBeeDb.Views(false));
     return;
 }
 
