@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DependencyList, type FormEvent, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type DependencyList, type FormEvent, type ReactNode } from 'react';
 import { AlertCircle, LoaderCircle, Search, X } from 'lucide-react';
 import { ApiError } from './api';
 
@@ -36,7 +36,10 @@ export function SearchBox({ value, onChange, label = 'Rechercher par nom' }: { v
   return <label className="search"><Search size={18} /><input aria-label={label} placeholder={label} value={value} onChange={e => onChange(e.target.value)} maxLength={120} /></label>;
 }
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
-  return <label className="field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>;
+  const id = useId();
+  const control = isValidElement<{ id?: string; 'aria-describedby'?: string }>(children)
+    ? cloneElement(children, { id, 'aria-describedby': hint ? `${id}-hint` : undefined }) : children;
+  return <div className="field"><label htmlFor={id}>{label}</label>{control}{hint && <small id={`${id}-hint`}>{hint}</small>}</div>;
 }
 export function Modal({ title, children, close, wide = false }: { title: string; children: ReactNode; close: () => void; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);

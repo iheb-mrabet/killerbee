@@ -97,6 +97,16 @@ try {
   await rd('ingredients.save', { ...unused, description: 'Description modifiée' });
   await rd('ingredients.delete', { id: unused.id, revision: 2 });
   check(true, 'ingredient create, update and delete operations work');
+  let disposable = await rd('models.save', { name: `Supprimable modèle ${suffix}`, description: 'Sans historique', range: 'Loisir', unitPriceCents: 100, ingredients: [{ ingredientId: ingredient.id, quantityCg: 100 }], characteristics: { [diameter.id]: '20' } });
+  const disposableProcess = await rd('processes.save', { modelId: disposable.id, name: `Procédé temporaire ${suffix}`, description: 'Sans historique', steps: [{ name: 'Étape temporaire', description: 'Instruction temporaire' }] });
+  let disposableTest = await rd('tests.save', { processId: disposableProcess.id, stepId: null, name: `Test temporaire ${suffix}`, description: 'Sans historique', expectedResult: 'Conforme' });
+  disposableTest = await rd('tests.save', { id: disposableTest.id, revision: disposableTest.revision, processId: disposableProcess.id, stepId: null, name: `Test temporaire modifié ${suffix}`, description: 'Protocole modifié', expectedResult: 'Conforme' });
+  await rd('tests.delete', { id: disposableTest.id, revision: disposableTest.revision });
+  await rd('processes.delete', { id: disposableProcess.id, revision: disposableProcess.revision });
+  disposable = await rd('models.get', { id: disposable.id });
+  await rd('models.delete', { id: disposable.id, revision: disposable.revision });
+  await rd('models.get', { id: disposable.id }, 404);
+  check(true, 'unused models, processes and test definitions support guarded deletion');
   const audit = await rd('audit.list');
   check(audit.some(e => e.actor === 'demo.rd') && audit.some(e => e.actor === 'demo.test'), 'audit records both research and testing identities');
 
@@ -126,6 +136,19 @@ try {
   check(true, 'real browser can create, edit and delete an ingredient');
   await nav.getByRole('button', { name: 'Modèles', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Consulter', exact: true }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Nouveau modèle', exact: true }).click();
+  await page.getByLabel('Nom du modèle *', { exact: true }).fill(`Modèle UI ${suffix}`);
+  await page.getByLabel('Description *', { exact: true }).fill('Modèle saisi dans le navigateur');
+  await page.getByLabel('Prix unitaire HT (€) *', { exact: true }).fill('12.001');
+  await page.getByLabel('Quantité (g) *', { exact: true }).fill('125,37');
+  await page.getByLabel('Diamètre (cm) *', { exact: true }).fill('27,3');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect(page.getByText('Saisissez un nombre positif avec au maximum deux décimales.', { exact: true })).toBeVisible();
+  await page.getByLabel('Prix unitaire HT (€) *', { exact: true }).fill('12,34');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: `Modèle UI ${suffix}`, exact: true })).toBeVisible();
+  check(true, 'model form validates decimal precision and supports dynamic fields');
   await page.screenshot({ path: resolve(root, 'test-results/models.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: resolve(root, 'test-results/mobile.png'), fullPage: true });
@@ -134,6 +157,8 @@ try {
   console.log(`KillerBee end-to-end verification passed: ${assertions} checks.`);
 } catch (error) {
   console.error(error);
+  const failurePage = browser?.contexts().flatMap(c => c.pages()).at(-1);
+  if (failurePage) await failurePage.screenshot({ path: resolve(root, 'test-results/failure.png'), fullPage: true }).catch(() => {});
   for (const name of ['runner', 'local', 'platform', 'components-a', 'components-b']) {
     try { console.error(`--- ${name} log ---\n${readFileSync(resolve(root, `.demo/${name}.log`), 'utf8').slice(-18000)}`); } catch { /* no log */ }
   }
